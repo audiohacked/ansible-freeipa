@@ -96,6 +96,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   subject_base:
     description:
       The certificate subject base (default O=<realm-name>).
@@ -113,6 +114,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   domainlevel:
     description: The domain level
     type: int
@@ -131,7 +133,8 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.ansible_ipa_server import (
     check_imports,
     MAX_DOMAIN_LEVEL, AnsibleModuleLog, options, sysrestore, paths,
-    api_Backend_ldap2, ds_init_info, redirect_stdout, setup_logging
+    api_Backend_ldap2, ds_init_info, redirect_stdout, setup_logging,
+    krbinstance, service
 )
 
 
@@ -220,6 +223,16 @@ def main():
 
     with redirect_stdout(ansible_log):
         ds.change_admin_password(options.admin_password)
+
+    # Force KDC to refresh the cached value of ipaKrbAuthzData by restarting.
+    # ipaKrbAuthzData has to be set with "MS-PAC" to trigger PAC generation,
+    # which is required to handle S4U2Proxy with the Bronze-Bit fix.
+    # Not doing so would cause API malfunction for around a minute, which is
+    # long enough to cause the hereafter client installation to fail.
+    krb = krbinstance.KrbInstance(fstore)
+    krb.set_output(ansible_log)
+    service.print_msg("Restarting the KDC")
+    krb.restart()
 
     # done ##########################################################
 

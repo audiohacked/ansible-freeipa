@@ -73,6 +73,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   no_host_dns:
     description: Do not use DNS for hostname lookup during installation
     type: bool
@@ -211,6 +212,7 @@ options:
   random_serial_numbers:
     description: The installer random_serial_numbers setting
     type: bool
+    default: no
     required: no
   allow_zone_overlap:
     description: Create DNS zone even if it already exists
@@ -222,6 +224,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   no_reverse:
     description: Do not create new reverse DNS zone
     type: bool
@@ -241,6 +244,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   no_forwarders:
     description: Do not add any DNS forwarders, use root servers instead
     type: bool
@@ -1054,6 +1058,11 @@ def main():
 
     domain_name = domain_name.lower()
 
+    # Both host_name and domain_name are lowercase at this point.
+    if host_name == domain_name:
+        ansible_module.fail_json(
+            msg="hostname cannot be the same as the domain name")
+
     if not options.realm_name:
         realm_name = domain_name.upper()
     else:
@@ -1067,7 +1076,7 @@ def main():
         try:
             validate_domain_name(realm_name, entity="realm")
         except ValueError as e:
-            raise ScriptError("Invalid realm name: {}".format(unicode(e)))
+            raise ScriptError("Invalid realm name: {0}".format(unicode(e)))
 
     if not options.setup_adtrust:
         # If domain name and realm does not match, IPA server will not be able
@@ -1165,7 +1174,7 @@ def main():
         changed=False,
         ipa_python_version=IPA_PYTHON_VERSION,
         # basic
-        domain=options.domain_name,
+        domain=domain_name,
         realm=realm_name,
         hostname=host_name,
         _hostname_overridden=bool(options.host_name),

@@ -1,30 +1,36 @@
 ---
 repos:
 - repo: https://github.com/ansible/ansible-lint.git
-  rev: v6.6.1
+  rev: v24.5.0
   hooks:
   - id: ansible-lint
     always_run: false
     pass_filenames: true
     files: \.(yaml|yml)$
     exclude: /env[^/]*.(yaml|yml)$
-    entry: |
-        env ANSIBLE_LIBRARY=./plugins/modules ANSIBLE_MODULE_UTILS=./plugins/module_utils ANSIBLE_DOC_FRAGMENT_PLUGINS=./plugins/doc_fragments ansible-lint
+    entry: |-
+        env
+        ANSIBLE_LIBRARY=./plugins/modules
+        ANSIBLE_MODULE_UTILS=./plugins/module_utils
+        ANSIBLE_DOC_FRAGMENT_PLUGINS=./plugins/doc_fragments
+        ansible-lint
+          --offline
+          --profile production
+          --exclude tests/integration/
+          --exclude tests/unit/
+          --parseable
+          --nocolor
 - repo: https://github.com/adrienverge/yamllint.git
-  rev: v1.28.0
+  rev: v1.35.1
   hooks:
   - id: yamllint
     files: \.(yaml|yml)$
 - repo: https://github.com/pycqa/flake8
-  rev: 5.0.3
+  rev: 7.0.0
   hooks:
   - id: flake8
-- repo: https://github.com/pycqa/pydocstyle
-  rev: 6.0.0
-  hooks:
-  - id: pydocstyle
 - repo: https://github.com/pycqa/pylint
-  rev: v2.14.4
+  rev: v3.2.2
   hooks:
   - id: pylint
     args:
@@ -44,4 +50,7 @@ repos:
     name: ShellCheck
     language: system
     entry: shellcheck
-    files: \.sh$
+    args: ['-x']
+    files: >
+      \.sh$
+      utils/sh*$

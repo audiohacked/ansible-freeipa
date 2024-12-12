@@ -142,11 +142,10 @@ def find_servicedelegationrule(module, name):
     try:
         _result = module.ipa_command("servicedelegationrule_show", name,
                                      {"all": True})
-    except Exception:  # pylint: disable=broad-except
+    except ipalib_errors.NotFound:
         # An exception is raised if servicedelegationrule name is not found.
         return None
-    else:
-        return _result["result"]
+    return _result["result"]
 
 
 def check_targets(module, targets):

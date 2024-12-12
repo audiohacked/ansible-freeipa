@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 # Authors:
+#   Denis Karpelevich <dkarpele@redhat.com>
 #   Rafael Guterres Jeffman <rjeffman@redhat.com>
 #   Thomas Woerner <twoerner@redhat.com>
 #
@@ -43,8 +44,136 @@ options:
     description: The service to manage
     type: list
     elements: str
-    required: true
+    required: false
     aliases: ["service"]
+  services:
+    description: The list of service dicts.
+    type: list
+    elements: dict
+    suboptions:
+      name:
+        description: The service to manage
+        type: str
+        required: true
+        aliases: ["service"]
+      certificate:
+        description: Base-64 encoded service certificate.
+        required: false
+        type: list
+        elements: str
+        aliases: ["usercertificate"]
+      pac_type:
+        description: Supported PAC type.
+        required: false
+        choices: ["MS-PAC", "PAD", "NONE", ""]
+        type: list
+        elements: str
+        aliases: ["pac_type", "ipakrbauthzdata"]
+      auth_ind:
+        description: Defines an allow list for Authentication Indicators.
+        type: list
+        elements: str
+        required: false
+        choices: ["otp", "radius", "pkinit", "hardened", "idp", ""]
+        aliases: ["krbprincipalauthind"]
+      skip_host_check:
+        description: Skip checking if host object exists.
+        required: False
+        type: bool
+      force:
+        description: Force principal name even if host is not in DNS.
+        required: False
+        type: bool
+      requires_pre_auth:
+        description: Pre-authentication is required for the service.
+        required: false
+        type: bool
+        aliases: ["ipakrbrequirespreauth"]
+      ok_as_delegate:
+        description: Client credentials may be delegated to the service.
+        required: false
+        type: bool
+        aliases: ["ipakrbokasdelegate"]
+      ok_to_auth_as_delegate:
+        description: Allow service to authenticate on behalf of a client.
+        required: false
+        type: bool
+        aliases: ["ipakrboktoauthasdelegate"]
+      principal:
+        description: List of principal aliases for the service.
+        required: false
+        type: list
+        elements: str
+        aliases: ["krbprincipalname"]
+      smb:
+        description: Add a SMB service.
+        required: false
+        type: bool
+      netbiosname:
+        description: NETBIOS name for the SMB service.
+        required: false
+        type: str
+      host:
+        description: Host that can manage the service.
+        required: false
+        type: list
+        elements: str
+        aliases: ["managedby_host"]
+      allow_create_keytab_user:
+        description: Users allowed to create a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_write_keys_user"]
+      allow_create_keytab_group:
+        description: Groups allowed to create a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_write_keys_group"]
+      allow_create_keytab_host:
+        description: Hosts allowed to create a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_write_keys_host"]
+      allow_create_keytab_hostgroup:
+        description: Host group allowed to create a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_write_keys_hostgroup"]
+      allow_retrieve_keytab_user:
+        description: User allowed to retrieve a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_read_keys_user"]
+      allow_retrieve_keytab_group:
+        description: Groups allowed to retrieve a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_read_keys_group"]
+      allow_retrieve_keytab_host:
+        description: Hosts allowed to retrieve a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_read_keys_host"]
+      allow_retrieve_keytab_hostgroup:
+        description: Host groups allowed to retrieve a keytab of this host.
+        required: false
+        type: list
+        elements: str
+        aliases: ["ipaallowedtoperform_read_keys_hostgroup"]
+      delete_continue:
+        description:
+          Continuous mode. Don't stop on errors.
+          Valid only if `state` is `absent`.
+        required: false
+        type: bool
+        aliases: ["continue"]
   certificate:
     description: Base-64 encoded service certificate.
     required: false
@@ -63,7 +192,7 @@ options:
     type: list
     elements: str
     required: false
-    choices: ["otp", "radius", "pkinit", "hardened", ""]
+    choices: ["otp", "radius", "pkinit", "hardened", "idp", ""]
     aliases: ["krbprincipalauthind"]
   skip_host_check:
     description: Skip checking if host object exists.
@@ -239,6 +368,52 @@ EXAMPLES = """
       - host1.example.com
       - host2.example.com
       action: member
+
+  # Ensure multiple services are present.
+  - ipaservice:
+      ipaadmin_password: SomeADMINpassword
+      services:
+      - name: HTTP/www.example.com
+        host:
+        - host1.example.com
+      - name: HTTP/www.service.com
+
+  # Ensure multiple services are present
+  - ipaservice:
+      ipaadmin_password: SomeADMINpassword
+      services:
+      - name: HTTP/www.example.com
+        principal:
+        - host/host1.example.com
+      - name: mysvc/www.example.com
+        pac_type: NONE
+        ok_as_delegate: yes
+        ok_to_auth_as_delegate: yes
+      - name: HTTP/www.example.com
+        allow_create_keytab_user:
+        - user01
+        - user02
+        allow_create_keytab_group:
+        - group01
+        - group02
+        allow_create_keytab_host:
+        - host1.example.com
+        - host2.example.com
+        allow_create_keytab_hostgroup:
+        - hostgroup01
+        - hostgroup02
+      - name: mysvc/host2.example.com
+        auth_ind: otp,radius
+
+  # Ensure service host members are present
+  - ipaservice:
+      ipaadmin_password: SomeADMINpassword
+      services:
+      - name: HTTP/www1.example.com
+        host: host1.example.com
+      - name: HTTP/www2.example.com
+        host: host2.example.com
+      action: member
 """
 
 RETURN = """
@@ -247,7 +422,10 @@ RETURN = """
 from ansible.module_utils.ansible_freeipa_module import \
     IPAAnsibleModule, compare_args_ipa, encode_certificate, \
     gen_add_del_lists, gen_add_list, gen_intersection_list, ipalib_errors, \
-    api_get_realm, to_text
+    api_get_realm, to_text, convert_input_certificates
+from ansible.module_utils import six
+if six.PY3:
+    unicode = str
 
 
 def find_service(module, name):
@@ -280,15 +458,15 @@ def gen_args(pac_type, auth_ind, skip_host_check, force, requires_pre_auth,
     if auth_ind is not None:
         _args['krbprincipalauthind'] = auth_ind
     if skip_host_check is not None:
-        _args['skip_host_check'] = (skip_host_check)
+        _args['skip_host_check'] = skip_host_check
     if force is not None:
-        _args['force'] = (force)
+        _args['force'] = force
     if requires_pre_auth is not None:
-        _args['ipakrbrequirespreauth'] = (requires_pre_auth)
+        _args['ipakrbrequirespreauth'] = requires_pre_auth
     if ok_as_delegate is not None:
-        _args['ipakrbokasdelegate'] = (ok_as_delegate)
+        _args['ipakrbokasdelegate'] = ok_as_delegate
     if ok_to_auth_as_delegate is not None:
-        _args['ipakrboktoauthasdelegate'] = (ok_to_auth_as_delegate)
+        _args['ipakrboktoauthasdelegate'] = ok_to_auth_as_delegate
 
     return _args
 
@@ -299,9 +477,9 @@ def gen_args_smb(netbiosname, ok_as_delegate, ok_to_auth_as_delegate):
     if netbiosname is not None:
         _args['ipantflatname'] = netbiosname
     if ok_as_delegate is not None:
-        _args['ipakrbokasdelegate'] = (ok_as_delegate)
+        _args['ipakrbokasdelegate'] = ok_as_delegate
     if ok_to_auth_as_delegate is not None:
-        _args['ipakrboktoauthasdelegate'] = (ok_to_auth_as_delegate)
+        _args['ipakrboktoauthasdelegate'] = ok_to_auth_as_delegate
 
     return _args
 
@@ -321,8 +499,9 @@ def check_parameters(module, state, action, names):
          'allow_retrieve_keytab_hostgroup']
 
     if state == 'present':
-        if len(names) != 1:
-            module.fail_json(msg="Only one service can be added at a time.")
+        if names is not None and len(names) != 1:
+            module.fail_json(msg="Only one service can be added at a time "
+                                 "using 'name'.")
 
         if action == 'service':
             invalid = ['delete_continue']
@@ -338,9 +517,6 @@ def check_parameters(module, state, action, names):
             invalid.append('delete_continue')
 
     elif state == 'absent':
-        if len(names) < 1:
-            module.fail_json(msg="No name given.")
-
         if action == "service":
             invalid.extend(invalid_not_member)
         else:
@@ -359,68 +535,96 @@ def check_parameters(module, state, action, names):
     module.params_fail_used_invalid(invalid, state, action)
 
 
+def check_authind(module, auth_ind):
+    _invalid = module.ipa_command_invalid_param_choices(
+        "service_add", "krbprincipalauthind", auth_ind)
+    if _invalid:
+        module.fail_json(
+            msg="The use of krbprincipalauthind '%s' is not supported "
+            "by your IPA version" % "','".join(_invalid))
+
+
 def init_ansible_module():
+    service_spec = dict(
+        # service attributesstr
+        certificate=dict(type="list", elements="str",
+                         aliases=['usercertificate'],
+                         default=None, required=False),
+        principal=dict(type="list", elements="str",
+                       aliases=["krbprincipalname"], default=None),
+        smb=dict(type="bool", required=False),
+        netbiosname=dict(type="str", required=False),
+        pac_type=dict(type="list", elements="str",
+                      aliases=["ipakrbauthzdata"],
+                      choices=["MS-PAC", "PAD", "NONE", ""]),
+        auth_ind=dict(type="list", elements="str",
+                      aliases=["krbprincipalauthind"],
+                      choices=["otp", "radius", "pkinit", "hardened", "idp",
+                               ""]),
+        skip_host_check=dict(type="bool"),
+        force=dict(type="bool"),
+        requires_pre_auth=dict(
+            type="bool", aliases=["ipakrbrequirespreauth"]),
+        ok_as_delegate=dict(type="bool", aliases=["ipakrbokasdelegate"]),
+        ok_to_auth_as_delegate=dict(type="bool",
+                                    aliases=["ipakrboktoauthasdelegate"]),
+        host=dict(type="list", elements="str", aliases=["managedby_host"],
+                  required=False),
+        allow_create_keytab_user=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_write_keys_user']),
+        allow_retrieve_keytab_user=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_read_keys_user']),
+        allow_create_keytab_group=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_write_keys_group']),
+        allow_retrieve_keytab_group=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_read_keys_group']),
+        allow_create_keytab_host=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_write_keys_host']),
+        allow_retrieve_keytab_host=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_read_keys_host']),
+        allow_create_keytab_hostgroup=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_write_keys_hostgroup']),
+        allow_retrieve_keytab_hostgroup=dict(
+            type="list", elements="str", required=False, no_log=False,
+            aliases=['ipaallowedtoperform_read_keys_hostgroup']),
+        delete_continue=dict(type="bool", required=False,
+                             aliases=['continue']),
+    )
     ansible_module = IPAAnsibleModule(
         argument_spec=dict(
             # general
             name=dict(type="list", elements="str", aliases=["service"],
-                      required=True),
-            # service attributesstr
-            certificate=dict(type="list", elements="str",
-                             aliases=['usercertificate'],
-                             default=None, required=False),
-            principal=dict(type="list", elements="str",
-                           aliases=["krbprincipalname"], default=None),
-            smb=dict(type="bool", required=False),
-            netbiosname=dict(type="str", required=False),
-            pac_type=dict(type="list", elements="str",
-                          aliases=["ipakrbauthzdata"],
-                          choices=["MS-PAC", "PAD", "NONE", ""]),
-            auth_ind=dict(type="list", elements="str",
-                          aliases=["krbprincipalauthind"],
-                          choices=["otp", "radius", "pkinit", "hardened", ""]),
-            skip_host_check=dict(type="bool"),
-            force=dict(type="bool"),
-            requires_pre_auth=dict(
-                type="bool", aliases=["ipakrbrequirespreauth"]),
-            ok_as_delegate=dict(type="bool", aliases=["ipakrbokasdelegate"]),
-            ok_to_auth_as_delegate=dict(type="bool",
-                                        aliases=["ipakrboktoauthasdelegate"]),
-            host=dict(type="list", elements="str", aliases=["managedby_host"],
-                      required=False),
-            allow_create_keytab_user=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_write_keys_user']),
-            allow_retrieve_keytab_user=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_read_keys_user']),
-            allow_create_keytab_group=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_write_keys_group']),
-            allow_retrieve_keytab_group=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_read_keys_group']),
-            allow_create_keytab_host=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_write_keys_host']),
-            allow_retrieve_keytab_host=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_read_keys_host']),
-            allow_create_keytab_hostgroup=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_write_keys_hostgroup']),
-            allow_retrieve_keytab_hostgroup=dict(
-                type="list", elements="str", required=False, no_log=False,
-                aliases=['ipaallowedtoperform_read_keys_hostgroup']),
-            delete_continue=dict(type="bool", required=False,
-                                 aliases=['continue']),
+                      default=None, required=False),
+            services=dict(type="list",
+                          default=None,
+                          options=dict(
+                              # Here name is a simple string
+                              name=dict(type="str", required=True,
+                                        aliases=["service"]),
+                              # Add service specific parameters
+                              **service_spec
+                          ),
+                          elements='dict',
+                          required=False),
             # action
             action=dict(type="str", default="service",
                         choices=["member", "service"]),
             # state
             state=dict(type="str", default="present",
                        choices=["present", "absent", "disabled"]),
+
+            # Add service specific parameters for simple use case
+            **service_spec
         ),
+        mutually_exclusive=[["name", "services"]],
+        required_one_of=[["name", "services"]],
         supports_check_mode=True,
     )
 
@@ -436,12 +640,15 @@ def main():
 
     # general
     names = ansible_module.params_get("name")
+    services = ansible_module.params_get("services")
 
     # service attributes
     principal = ansible_module.params_get("principal")
     certificate = ansible_module.params_get("certificate")
-    pac_type = ansible_module.params_get("pac_type", allow_empty_string=True)
-    auth_ind = ansible_module.params_get("auth_ind", allow_empty_string=True)
+    pac_type = ansible_module.params_get(
+        "pac_type", allow_empty_list_item=True)
+    auth_ind = ansible_module.params_get(
+        "auth_ind", allow_empty_list_item=True)
     skip_host_check = ansible_module.params_get("skip_host_check")
     force = ansible_module.params_get("force")
     requires_pre_auth = ansible_module.params_get("requires_pre_auth")
@@ -462,7 +669,17 @@ def main():
     state = ansible_module.params_get("state")
 
     # check parameters
+    if (names is None or len(names) < 1) and \
+       (services is None or len(services) < 1):
+        ansible_module.fail_json(msg="At least one name or services is "
+                                     "required")
     check_parameters(ansible_module, state, action, names)
+    certificate = convert_input_certificates(ansible_module, certificate,
+                                             state)
+
+    # Use services if names is None
+    if services is not None:
+        names = services
 
     # Init
 
@@ -477,11 +694,50 @@ def main():
         if skip_host_check and not has_skip_host_check:
             ansible_module.fail_json(
                 msg="Skipping host check is not supported by your IPA version")
+        check_authind(ansible_module, auth_ind)
 
         commands = []
         keytab_members = ["user", "group", "host", "hostgroup"]
+        service_set = set()
 
-        for name in names:
+        for service in names:
+            if isinstance(service, dict):
+                name = service.get("name")
+                if name in service_set:
+                    ansible_module.fail_json(
+                        msg="service '%s' is used more than once" % name)
+                service_set.add(name)
+                principal = service.get("principal")
+                certificate = service.get("certificate")
+                certificate = convert_input_certificates(ansible_module,
+                                                         certificate, state)
+                pac_type = service.get("pac_type")
+                auth_ind = service.get("auth_ind")
+                check_authind(ansible_module, auth_ind)
+                skip_host_check = service.get("skip_host_check")
+                if skip_host_check and not has_skip_host_check:
+                    ansible_module.fail_json(
+                        msg="Skipping host check is not supported by your IPA "
+                            "version")
+                force = service.get("force")
+                requires_pre_auth = service.get("requires_pre_auth")
+                ok_as_delegate = service.get("ok_as_delegate")
+                ok_to_auth_as_delegate = service.get("ok_to_auth_as_delegate")
+                smb = service.get("smb")
+                netbiosname = service.get("netbiosname")
+                host = service.get("host")
+
+                delete_continue = service.get("delete_continue")
+
+            elif (
+                isinstance(
+                    service, (str, unicode)  # pylint: disable=W0012,E0606
+                )
+            ):
+                name = service
+            else:
+                ansible_module.fail_json(msg="Service '%s' is not valid" %
+                                         repr(service))
             res_find = find_service(ansible_module, name)
             res_principals = []
 
@@ -624,7 +880,9 @@ def main():
             elif state == "absent":
                 if action == "service":
                     if res_find is not None:
-                        args = {'continue': delete_continue}
+                        args = {}
+                        if delete_continue is not None:
+                            args['continue'] = delete_continue
                         commands.append([name, 'service_del', args])
 
                 elif action == "member":
@@ -713,7 +971,7 @@ def main():
 
         # Execute commands
         changed = ansible_module.execute_ipa_commands(
-            commands, fail_on_member_errors=True)
+            commands, batch=True, keeponly=[], fail_on_member_errors=True)
 
     # Done
     ansible_module.exit_json(changed=changed, **exit_args)
