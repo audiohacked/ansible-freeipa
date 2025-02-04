@@ -13,10 +13,12 @@ Features
 * Repair mode for clients
 * Backup and restore, also to and from controller
 * Smartcard setup for servers and clients
+* Inventory plugin freeipa
 * Modules for automembership rule management
 * Modules for automount key management
 * Modules for automount location management
 * Modules for automount map management
+* Modules for certificate management
 * Modules for config management
 * Modules for delegation management
 * Modules for dns config management
@@ -29,7 +31,11 @@ Features
 * Modules for hbacsvcgroup management
 * Modules for host management
 * Modules for hostgroup management
+* Modules for idoverridegroup management
+* Modules for idoverrideuser management
+* Modules for idp management
 * Modules for idrange management
+* Modules for idview management
 * Modules for location management
 * Modules for netgroup management
 * Modules for permission management
@@ -60,7 +66,7 @@ Supported Distributions
 -----------------------
 
 * RHEL/CentOS 7.4+
-* Fedora 26+
+* Fedora 40+
 * Ubuntu
 * Debian 10+ (ipaclient only, no server or replica!)
 
@@ -68,7 +74,7 @@ Requirements
 ------------
 
 **Controller**
-* Ansible version: 2.8+ (ansible-freeipa is an Ansible Collection)
+* Ansible version: 2.14+
 
 **Node**
 * Supported FreeIPA version (see above)
@@ -103,9 +109,10 @@ You can use the roles directly within the top directory of the git repo, but to 
 You can either adapt ansible.cfg:
 
 ```
-roles_path   = /my/dir/ansible-freeipa/roles
-library      = /my/dir/ansible-freeipa/plugins/modules
-module_utils = /my/dir/ansible-freeipa/plugins/module_utils
+roles_path        = /my/dir/ansible-freeipa/roles
+library           = /my/dir/ansible-freeipa/plugins/modules
+module_utils      = /my/dir/ansible-freeipa/plugins/module_utils
+inventory_plugins = /my/dir/ansible-freeipa/plugins/inventory
 ```
 
 Or you can link the directories:
@@ -118,7 +125,7 @@ ansible-freeipa/plugins/module_utils to ~/.ansible/plugins/
 
 **RPM package**
 
-There are RPM packages available for Fedora 29+. These are installing the roles and modules into the global Ansible directories for `roles`, `plugins/modules` and `plugins/module_utils` in the `/usr/share/ansible` directory. Therefore is it possible to use the roles and modules without adapting the names like it is done in the example playbooks.
+There are RPM packages available for Fedora. These are installing the roles and modules into the global Ansible directories for `roles`, `plugins/modules` and `plugins/module_utils` in the `/usr/share/ansible` directory. Therefore is it possible to use the roles and modules without adapting the names like it is done in the example playbooks.
 
 **Ansible Galaxy**
 
@@ -128,17 +135,7 @@ This command will get the whole collection from galaxy:
 ansible-galaxy collection install freeipa.ansible_freeipa
 ```
 
-Installing collections using the ansible-galaxy command is only supported with ansible 2.9+.
-
-The mazer tool can be used for to install the collection for ansible 2.8:
-
-```bash
-mazer install freeipa.ansible_freeipa
-```
-
 Ansible galaxy does not support the use of dash ('-') in a name and is automatically replacing this with an underscore ('\_'). Therefore the name is `ansible_freeipa`. The ansible_freeipa collection will be placed in the directory `~/.ansible/collections/ansible_collections/freeipa/ansible_freeipa` where it will be automatically be found for this user.
-
-The needed adaptions of collection prefixes for `modules` and `module_utils` will be done with ansible-freeipa release `0.1.6` for galaxy.
 
 
 Ansible inventory file
@@ -436,6 +433,7 @@ Modules in plugin/modules
 * [ipaautomountkey](README-automountkey.md)
 * [ipaautomountlocation](README-automountlocation.md)
 * [ipaautomountmap](README-automountmap.md)
+* [ipacert](README-cert.md)
 * [ipaconfig](README-config.md)
 * [ipadelegation](README-delegation.md)
 * [ipadnsconfig](README-dnsconfig.md)
@@ -448,7 +446,11 @@ Modules in plugin/modules
 * [ipahbacsvcgroup](README-hbacsvcgroup.md)
 * [ipahost](README-host.md)
 * [ipahostgroup](README-hostgroup.md)
+* [idoverridegroup](README-idoverridegroup.md)
+* [idoverrideuser](README-idoverrideuser.md)
+* [idp](README-idp.md)
 * [idrange](README-idrange.md)
+* [idview](README-idview.md)
 * [ipalocation](README-location.md)
 * [ipanetgroup](README-netgroup.md)
 * [ipapermission](README-permission.md)
@@ -470,3 +472,8 @@ Modules in plugin/modules
 * [ipavault](README-vault.md)
 
 If you want to write a new module please read [writing a new module](plugins/modules/README.md).
+
+Inventory plugins in plugin/inventory
+=====================================
+
+* [freeipa](README-inventory-plugin-freeipa.md)

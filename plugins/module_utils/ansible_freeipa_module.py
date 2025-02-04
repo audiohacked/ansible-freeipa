@@ -25,11 +25,24 @@ from __future__ import (absolute_import, division, print_function)
 
 __metaclass__ = type
 
-__all__ = ["gssapi", "netaddr", "api", "ipalib_errors", "Env",
+__all__ = ["DEBUG_COMMAND_ALL", "DEBUG_COMMAND_LIST",
+           "DEBUG_COMMAND_COUNT", "DEBUG_COMMAND_BATCH",
+           "gssapi", "netaddr", "api", "ipalib_errors", "Env",
            "DEFAULT_CONFIG", "LDAP_GENERALIZED_TIME_FORMAT",
            "kinit_password", "kinit_keytab", "run", "DN", "VERSION",
            "paths", "tasks", "get_credentials_if_valid", "Encoding",
-           "load_pem_x509_certificate", "DNSName", "getargspec"]
+           "DNSName", "getargspec", "certificate_loader",
+           "write_certificate_list", "boolean", "template_str",
+           "urlparse", "normalize_sshpubkey"]
+
+DEBUG_COMMAND_ALL = 0b1111
+# Print the while command list:
+DEBUG_COMMAND_LIST = 0b0001
+# Print the number of commands:
+DEBUG_COMMAND_COUNT = 0b0010
+# Print information about the batch slice size and currently executed batch
+# slice:
+DEBUG_COMMAND_BATCH = 0b0100
 
 import os
 # ansible-freeipa requires locale to be C, IPA requires utf-8.
@@ -41,6 +54,9 @@ import tempfile
 import shutil
 import socket
 import base64
+import binascii
+import ast
+import time
 from datetime import datetime
 from contextlib import contextmanager
 from ansible.module_utils.basic import AnsibleModule
@@ -48,6 +64,7 @@ from ansible.module_utils._text import to_text
 from ansible.module_utils.common.text.converters import jsonify
 from ansible.module_utils import six
 from ansible.module_utils.common._collections_compat import Mapping
+from ansible.module_utils.parsing.convert_bool import boolean
 
 # Import getargspec from inspect or provide own getargspec for
 # Python 2 compatibility with Python 3.11+.
@@ -83,10 +100,15 @@ try:
     from ipalib.constants import DEFAULT_CONFIG, LDAP_GENERALIZED_TIME_FORMAT
 
     try:
-        from ipalib.install.kinit import kinit_password, kinit_keytab
+        from ipalib.kinit import kinit_password, kinit_keytab
     except ImportError:
-        from ipapython.ipautil import kinit_password, kinit_keytab
+        try:
+            from ipalib.install.kinit import kinit_password, kinit_keytab
+        except ImportError:
+            # pre 4.5.0
+            from ipapython.ipautil import kinit_password, kinit_keytab
     from ipapython.ipautil import run
+    from ipapython.ipautil import template_str
     from ipapython.dn import DN
     from ipapython.version import VERSION
     from ipaplatform.paths import paths
@@ -106,6 +128,7 @@ try:
     except ImportError:
         from ipalib.x509 import load_certificate
         certificate_loader = load_certificate
+    from ipalib.x509 import write_certificate_list
 
     # Try to import is_ipa_configured or use a fallback implementation.
     try:
@@ -141,6 +164,13 @@ try:
         _dcerpc_bindings_installed = True  # pylint: disable=invalid-name
     except ImportError:
         _dcerpc_bindings_installed = False  # pylint: disable=invalid-name
+
+    try:
+        from urllib.parse import urlparse
+    except ImportError:
+        from ansible.module_utils.six.moves.urllib.parse import urlparse
+
+    from ipalib.util import normalize_sshpubkey
 
 except ImportError as _err:
     ANSIBLE_FREEIPA_MODULE_IMPORT_ERROR = str(_err)
@@ -222,7 +252,7 @@ def temp_kdestroy(ccache_dir, ccache_name):
     """Destroy temporary ticket and remove temporary ccache."""
     if ccache_name is not None:
         run([paths.KDESTROY, '-c', ccache_name], raiseonerr=False)
-        del os.environ['KRB5CCNAME']
+        os.environ.pop('KRB5CCNAME', None)
     if ccache_dir is not None:
         shutil.rmtree(ccache_dir, ignore_errors=True)
 
@@ -323,7 +353,15 @@ def api_check_ipa_version(oper, requested_version):
                      tasks.parse_ipa_version(requested_version))
 
 
-def date_format(value):
+def date_string(value):
+    # Convert datetime to gernalized time format string
+    if not isinstance(value, datetime):
+        raise ValueError("Invalid datetime type '%s'" % repr(value))
+
+    return value.strftime(LDAP_GENERALIZED_TIME_FORMAT)
+
+
+def convert_date(value):
     accepted_date_formats = [
         LDAP_GENERALIZED_TIME_FORMAT,  # generalized time
         '%Y-%m-%dT%H:%M:%SZ',  # ISO 8601, second precision
@@ -335,7 +373,7 @@ def date_format(value):
 
     for _date_format in accepted_date_formats:
         try:
-            return datetime.strptime(value, _date_format)
+            return date_string(datetime.strptime(value, _date_format))
         except ValueError:
             pass
     raise ValueError("Invalid date '%s'" % value)
@@ -459,20 +497,22 @@ def _afm_convert(value):
     return value
 
 
-def module_params_get(module, name, allow_empty_string=False):
+def module_params_get(module, name, allow_empty_list_item=False):
     value = _afm_convert(module.params.get(name))
 
-    # Fail on empty strings in the list or if allow_empty_string is True
-    # if there is another entry in the list together with the empty
-    # string.
+    # Fail on empty strings in the list or if allow_empty_list_item is True
+    # if there is another entry in the list together with the empty string.
     # Due to an issue in Ansible it is possible to use the empty string
     # "" for lists with choices, even if the empty list is not part of
     # the choices.
     # Ansible issue https://github.com/ansible/ansible/issues/77108
     if isinstance(value, list):
         for val in value:
-            if isinstance(val, (str, unicode)) and not val:
-                if not allow_empty_string:
+            if (
+                isinstance(val, (str, unicode))  # pylint: disable=W0012,E0606
+                and not val
+            ):
+                if not allow_empty_list_item:
                     module.fail_json(
                         msg="Parameter '%s' contains an empty string" %
                         name)
@@ -484,12 +524,58 @@ def module_params_get(module, name, allow_empty_string=False):
     return value
 
 
-def module_params_get_lowercase(module, name, allow_empty_string=False):
-    value = module_params_get(module, name, allow_empty_string)
+def module_params_get_lowercase(module, name, allow_empty_list_item=False):
+    value = module_params_get(module, name, allow_empty_list_item)
+    return convert_param_value_to_lowercase(value)
+
+
+def convert_param_value_to_lowercase(value):
     if isinstance(value, list):
         value = [v.lower() for v in value]
     if isinstance(value, (str, unicode)):
         value = value.lower()
+    return value
+
+
+def module_params_get_with_type_cast(
+    module, name, datatype, allow_empty=False
+):
+    """
+    Retrieve value set for module parameter as a specific data type.
+
+    Parameters
+    ----------
+    module: AnsibleModule
+        The module from where to get the parameter value from.
+    name: string
+        The name of the parameter to retrieve.
+    datatype: type
+        The type to convert the value to, if value is not empty.
+    allow_empty: bool
+        Allow an empty string for non list parameters or a list
+        containing (only) an empty string item. This is used for
+        resetting parameters to the default value.
+
+    """
+    value = module_params_get(module, name, allow_empty)
+    if not allow_empty and value == "":
+        module.fail_json(
+            msg="Argument '%s' must not be an empty string" % (name,)
+        )
+    if value is not None and value != "":
+        try:
+            if datatype is bool:
+                # We let Ansible handle bool values
+                value = boolean(value)
+            else:
+                value = datatype(value)
+        except ValueError:
+            module.fail_json(
+                msg="Invalid value '%s' for argument '%s'" % (value, name)
+            )
+        except TypeError as terr:
+            # If Ansible fails to parse a boolean, it will raise TypeError
+            module.fail_json(msg="Param '%s': %s" % (name, str(terr)))
     return value
 
 
@@ -501,6 +587,20 @@ def ensure_fqdn(name, domain):
     if "." not in name:
         return "%s.%s" % (name, domain)
     return name
+
+
+def convert_to_sid(items):
+    """Convert all items to SID, if possible."""
+    def get_sid(data):
+        try:
+            return get_trusted_domain_object_sid(data)
+        except ipalib_errors.NotFound:
+            return data
+    if items is None:
+        return None
+    if not isinstance(items, (list, tuple)):
+        items = [items]
+    return [get_sid(item) for item in items]
 
 
 def api_get_realm():
@@ -571,6 +671,7 @@ def encode_certificate(cert):
     Encode a certificate using base64.
 
     It also takes FreeIPA and Python versions into account.
+    This is used to convert the certificates returned by find and show.
     """
     if isinstance(cert, (str, unicode, bytes)):
         encoded = base64.b64encode(cert)
@@ -579,6 +680,33 @@ def encode_certificate(cert):
     if not six.PY2:
         encoded = encoded.decode('ascii')
     return encoded
+
+
+def convert_input_certificates(module, certs, state):
+    """
+    Convert certificates.
+
+    Remove all newlines and white spaces from the certificates.
+    This is used on input parameter certificates of modules.
+    """
+    if certs is None:
+        return None
+
+    _certs = []
+    for cert in certs:
+        try:
+            _cert = base64.b64encode(base64.b64decode(cert)).decode("ascii")
+        except (TypeError, binascii.Error) as e:
+            # Idempotency: Do not fail for an invalid cert for state absent.
+            # The invalid certificate can not be set in FreeIPA.
+            if state == "absent":
+                continue
+            module.fail_json(
+                msg="Certificate %s: Base64 decoding failed: %s" %
+                (repr(cert), str(e)))
+        _certs.append(_cert)
+
+    return _certs
 
 
 def load_cert_from_str(cert):
@@ -747,8 +875,8 @@ def exit_raw_json(module, **kwargs):
     contains sensible data, it will be appear in the logs.
     """
     module.do_cleanup_files()
-    print(jsonify(kwargs))
-    sys.exit(0)
+    print(jsonify(kwargs))  # pylint: disable=W0012,ansible-bad-function
+    sys.exit(0)  # pylint: disable=W0012,ansible-bad-function
 
 
 def __get_domain_validator():
@@ -786,6 +914,13 @@ def get_trusted_domain_sid_from_name(dom_name):
     domain_validator = __get_domain_validator()
     sid = domain_validator.get_sid_from_domain_name(dom_name)
 
+    return unicode(sid) if sid is not None else None
+
+
+def get_trusted_domain_object_sid(object_name):
+    """Given an object name, returns de object SID."""
+    domain_validator = __get_domain_validator()
+    sid = domain_validator.get_trusted_domain_object_sid(object_name)
     return unicode(sid) if sid is not None else None
 
 
@@ -1040,7 +1175,7 @@ class IPAAnsibleModule(AnsibleModule):
             finally:
                 temp_kdestroy(ccache_dir, ccache_name)
 
-    def params_get(self, name, allow_empty_string=False):
+    def params_get(self, name, allow_empty_list_item=False):
         """
         Retrieve value set for module parameter.
 
@@ -1048,13 +1183,13 @@ class IPAAnsibleModule(AnsibleModule):
         ----------
         name: string
             The name of the parameter to retrieve.
-        allow_empty_string: bool
+        allow_empty_list_item: bool
             The parameter allowes to have empty strings in a list
 
         """
-        return module_params_get(self, name, allow_empty_string)
+        return module_params_get(self, name, allow_empty_list_item)
 
-    def params_get_lowercase(self, name, allow_empty_string=False):
+    def params_get_lowercase(self, name, allow_empty_list_item=False):
         """
         Retrieve value set for module parameter as lowercase, if not None.
 
@@ -1062,11 +1197,34 @@ class IPAAnsibleModule(AnsibleModule):
         ----------
         name: string
             The name of the parameter to retrieve.
-        allow_empty_string: bool
+        allow_empty_list_item: bool
             The parameter allowes to have empty strings in a list
 
         """
-        return module_params_get_lowercase(self, name, allow_empty_string)
+        return module_params_get_lowercase(self, name, allow_empty_list_item)
+
+    def params_get_with_type_cast(
+        self, name, datatype, allow_empty=True
+    ):
+        """
+        Retrieve value set for module parameter as a specific data type.
+
+        Parameters
+        ----------
+        name: string
+            The name of the parameter to retrieve.
+        datatype: type
+            The type to convert the value to, if not empty.
+        datatype: type
+            The type to convert the value to, if value is not empty.
+        allow_empty: bool
+            Allow an empty string for non list parameters or a list
+            containing (only) an empty string item. This is used for
+            resetting parameters to the default value.
+
+        """
+        return module_params_get_with_type_cast(
+            self, name, datatype, allow_empty)
 
     def params_fail_used_invalid(self, invalid_params, state, action=None):
         """
@@ -1166,6 +1324,45 @@ class IPAAnsibleModule(AnsibleModule):
         """
         return api_check_param(command, name)
 
+    def ipa_command_invalid_param_choices(self, command, name, value):
+        """
+        Return invalid parameter choices for IPA command.
+
+        Parameters
+        ----------
+        command: string
+            The IPA API command to test.
+        name: string
+            The parameter name to check.
+        value: string
+            The parameter value to verify.
+
+        """
+        if command not in api.Command:
+            self.fail_json(msg="The command '%s' does not exist." % command)
+        if name not in api.Command[command].params:
+            self.fail_json(msg="The command '%s' does not have a parameter "
+                           "named '%s'." % (command, name))
+        if not hasattr(api.Command[command].params[name], "cli_metavar"):
+            self.fail_json(msg="The parameter '%s' of the command '%s' does "
+                           "not have choices." % (name, command))
+        # For IPA 4.6 (RHEL-7):
+        # - krbprincipalauthind in host_add does not have choices defined
+        # - krbprincipalauthind in service_add does not have choices defined
+        #
+        # api.Command[command].params[name].cli_metavar returns "STR" and
+        # ast.literal_eval failes with a ValueError "malformed string".
+        #
+        # There is no way to verify that the given values are valid or not in
+        # this case. The check is done later on while applying the change
+        # with host_add, host_mod, service_add and service_mod.
+        try:
+            _choices = ast.literal_eval(
+                api.Command[command].params[name].cli_metavar)
+        except ValueError:
+            return None
+        return (set(value or []) - set([""])) - set(_choices)
+
     @staticmethod
     def ipa_check_version(oper, requested_version):
         """
@@ -1195,7 +1392,8 @@ class IPAAnsibleModule(AnsibleModule):
     def execute_ipa_commands(self, commands, result_handler=None,
                              exception_handler=None,
                              fail_on_member_errors=False,
-                             **handlers_user_args):
+                             batch=False, batch_slice_size=100, debug=False,
+                             keeponly=None, **handlers_user_args):
         """
         Execute IPA API commands from command list.
 
@@ -1212,6 +1410,16 @@ class IPAAnsibleModule(AnsibleModule):
             Returns True to continue to next command, else False
         fail_on_member_errors: bool
             Use default member error handler handler member_error_handler
+        batch: bool
+            Enable batch command use to speed up processing
+        batch_slice_size: integer
+            Maximum mumber of commands processed in a slice with the batch
+            command
+        keeponly: list of string
+            The attributes to keep in the results returned from the commands
+            Default: None (Keep all)
+        debug: integer
+            Enable debug output for the exection using DEBUG_COMMAND_*
         handlers_user_args: dict (user args mapping)
             The user args to pass to result_handler and exception_handler
             functions
@@ -1281,34 +1489,352 @@ class IPAAnsibleModule(AnsibleModule):
                 if "errors" in argspec.args:
                     handlers_user_args["errors"] = _errors
 
+        if debug & DEBUG_COMMAND_LIST:
+            self.tm_warn("commands: %s" % repr(commands))
+        if debug & DEBUG_COMMAND_COUNT:
+            self.tm_warn("#commands: %s" % len(commands))
+
+        # Turn off batch use for server context when it lacks the keeponly
+        # option as it lacks https://github.com/freeipa/freeipa/pull/7335
+        # This is an important fix about reporting errors in the batch
+        # (example: "no modifications to be performed") that results in
+        # aborted processing of the batch and an error about missing
+        # attribute principal. FreeIPA issue #9583
+        batch_has_keeponly = "keeponly" in api.Command.batch.options
+        if batch and api.env.in_server and not batch_has_keeponly:
+            self.debug(
+                "Turning off batch processing for batch missing keeponly")
+            batch = False
+
         changed = False
-        for name, command, args in commands:
-            try:
-                if name is None:
-                    result = self.ipa_command_no_name(command, args)
-                else:
-                    result = self.ipa_command(command, name, args)
+        if batch:
+            # batch processing
+            batch_args = []
+            for ci, (name, command, args) in enumerate(commands):
+                if len(batch_args) < batch_slice_size:
+                    batch_args.append({
+                        "method": command,
+                        "params": ([name], args)
+                    })
 
-                if "completed" in result:
-                    if result["completed"] > 0:
-                        changed = True
-                else:
-                    changed = True
-
-                # If result_handler is not None, call it with user args
-                # defined in **handlers_user_args
-                if result_handler is not None:
-                    result_handler(self, result, command, name, args,
-                                   **handlers_user_args)
-
-            except Exception as e:
-                if exception_handler is not None and \
-                   exception_handler(self, e, **handlers_user_args):
+                if len(batch_args) < batch_slice_size and \
+                   ci < len(commands) - 1:
+                    # fill in more commands untill batch slice size is reached
+                    # or final slice of commands
                     continue
-                self.fail_json(msg="%s: %s: %s" % (command, name, str(e)))
+
+                if debug & DEBUG_COMMAND_BATCH:
+                    self.tm_warn("batch %d (size %d/%d)" %
+                                 (ci / batch_slice_size, len(batch_args),
+                                  batch_slice_size))
+
+                # run the batch command
+                if batch_has_keeponly:
+                    result = api.Command.batch(batch_args, keeponly=keeponly)
+                else:
+                    result = api.Command.batch(batch_args)
+
+                if len(batch_args) != result["count"]:
+                    self.fail_json(
+                        "Result size %d does not match batch size %d" % (
+                            result["count"], len(batch_args)))
+                if result["count"] > 0:
+                    for ri, res in enumerate(result["results"]):
+                        _res = res.get("result", None)
+                        if not batch_has_keeponly and keeponly is not None \
+                           and isinstance(_res, dict):
+                            res["result"] = dict(
+                                filter(lambda x: x[0] in keeponly,
+                                       _res.items())
+                            )
+
+                        if "error" not in res or res["error"] is None:
+                            if result_handler is not None:
+                                result_handler(
+                                    self, res,
+                                    batch_args[ri]["method"],
+                                    batch_args[ri]["params"][0][0],
+                                    batch_args[ri]["params"][1],
+                                    **handlers_user_args)
+                            changed = True
+                        else:
+                            _errors.append(
+                                "%s: %s: %s" %
+                                (batch_args[ri]["method"],
+                                 str(batch_args[ri]["params"][0][0]),
+                                 res["error"]))
+                # clear batch command list (python2 compatible)
+                del batch_args[:]
+        else:
+            # no batch processing
+            for name, command, args in commands:
+                try:
+                    if name is None:
+                        result = self.ipa_command_no_name(command, args)
+                    else:
+                        result = self.ipa_command(command, name, args)
+
+                    if "completed" in result:
+                        if result["completed"] > 0:
+                            changed = True
+                    else:
+                        changed = True
+
+                    # Handle keeponly
+                    res = result.get("result", None)
+                    if keeponly is not None and isinstance(res, dict):
+                        result["result"] = dict(
+                            filter(lambda x: x[0] in keeponly, res.items())
+                        )
+
+                    # If result_handler is not None, call it with user args
+                    # defined in **handlers_user_args
+                    if result_handler is not None:
+                        result_handler(self, result, command, name, args,
+                                       **handlers_user_args)
+
+                except Exception as e:
+                    if exception_handler is not None and \
+                       exception_handler(self, e, **handlers_user_args):
+                        continue
+                    self.fail_json(msg="%s: %s: %s" % (command, name, str(e)))
 
         # Fail on errors from result_handler and exception_handler
         if len(_errors) > 0:
             self.fail_json(msg=", ".join(_errors))
 
         return changed
+
+    def tm_warn(self, warning):
+        ts = time.time()
+        # pylint: disable=super-with-arguments
+        super(IPAAnsibleModule, self).warn("%f %s" % (ts, warning))
+
+
+class EntryFactory:
+    """
+    Implement an Entry Factory to extract objects from modules.
+
+    When defining an ansible-freeipa module which allows the setting of
+    multiple objects in a single task, the object parameters can be set
+    as a set of parameters, or as a list of dictionaries with multiple
+    objects.
+
+    The EntryFactory abstracts the extraction of the entry values so
+    that the entries set in a module can be treated as a list of objects
+    independent of the way the objects have been defined (as single object
+    defined by its parameters or as a list).
+
+    Parameters
+    ----------
+        ansible_module: The ansible module to be processed.
+        invalid_params: The list of invalid parameters for the current
+            state/action combination.
+        multiname: The name of the list of objects parameters.
+        params: a dict of the entry parameters with its configuration as a
+            dict. The 'convert' configuration is a list of functions to be
+            applied, in order, to the provided value for the paarameter. Any
+            other configuration field is ignored in the current implementation.
+        validate_entry: an optional function to validate the entry values.
+            This function is called after the parameters for the current
+            state/action are checked, and can be used to perform further
+            validation or modification to the entry values. If the entry is
+            not valid, 'fail_json' should be called. The function must return
+            the entry, modified or not. The funcion signature is
+            'def fn(module:IPAAnsibleModule, entry: Entry) -> Entry:'
+        **user_vars: any other keyword argument is passed to the
+            validate_entry callback as user data.
+
+    Example
+    -------
+        def validate_entry(module, entry, mydata):
+            if (something_is_wrong(entry)):
+                module.fail_json(msg=f"Something wrong with {entry.name}")
+            entry.some_field = mydata
+            return entry
+
+        def main():
+            # ...
+            # Create param mapping, all moudle parameters must be
+            # present as keys of this dictionary
+            params = {
+                "name": {},
+                "description": {}
+                "user": {
+                    "convert": [convert_param_value_to_lowercase]
+                },
+                "group": {"convert": [convert_param_value_to_lowercase]}
+            }
+            entries = EntryFactory(
+                module, invalid_params, "entries", params,
+                validate_entry=validate_entry,
+                mydata=1234
+            )
+            #...
+            with module.ipa_connect(context=context):
+                # ...
+                for entry in entries:
+                    # process entry and create commands
+            # ...
+
+    """
+
+    def __init__(
+        self,
+        ansible_module,
+        invalid_params,
+        multiname,
+        params,
+        validate_entry=None,
+        **user_vars
+    ):
+        """Initialize the Entry Factory."""
+        self.ansible_module = ansible_module
+        self.invalid_params = set(invalid_params)
+        self.multiname = multiname
+        self.params = params
+        self.convert = {
+            param: (config or {}).get("convert", [])
+            for param, config in params.items()
+        }
+        self.validate_entry = validate_entry
+        self.user_vars = user_vars
+        self.__entries = self._get_entries()
+
+    def __iter__(self):
+        """Initialize factory iterator."""
+        return iter(self.__entries)
+
+    def __next__(self):
+        """Retrieve next entry."""
+        return next(self.__entries)
+
+    def check_invalid_parameter_usage(self, entry_dict, fail_on_check=True):
+        """
+        Check if entry_dict parameters are valid for the current state/action.
+
+        Parameters
+        ----------
+            entry_dict: A dictionary representing the module parameters.
+            fail_on_check: If set to True wil make the module execution fail
+                if invalid parameters are used.
+
+        Return
+        ------
+            If fail_on_check is not True, returns True if the entry parameters
+            are valid and execution should proceed, False otherwise.
+
+        """
+        state = self.ansible_module.params_get("state")
+        action = self.ansible_module.params_get("action")
+
+        if action is None:
+            msg = "Arguments '{0}' can not be used with state '{1}'"
+        else:
+            msg = "Arguments '{0}' can not be used with action " \
+                  "'{2}' and state '{1}'"
+
+        entry_params = set(k for k, v in entry_dict.items() if v is not None)
+        match_invalid = self.invalid_params & entry_params
+        if match_invalid:
+            if fail_on_check:
+                self.ansible_module.fail_json(
+                    msg=msg.format(", ".join(match_invalid), state, action))
+            return False
+
+        if not entry_dict.get("name"):
+            if fail_on_check:
+                self.ansible_module.fail_json(msg="Entry 'name' is not set.")
+            return False
+
+        return True
+
+    class Entry:
+        """Provide an abstraction to handle module entries."""
+
+        def __init__(self, values):
+            """Initialize entry to be used as dict or object."""
+            self.values = values
+            for key, value in values.items():
+                setattr(self, key, value)
+
+        def copy(self):
+            """Make a copy of the entry."""
+            return EntryFactory.Entry(self.values.copy())
+
+        def __setitem__(self, item, value):
+            """Allow entries to be treated as dictionaries."""
+            self.values[item] = value
+            setattr(self, item, value)
+
+        def __getitem__(self, item):
+            """Allow entries to be treated as dictionaries."""
+            return self.values[item]
+
+        def __setattr__(self, attrname, value):
+            if attrname != "values" and attrname in self.values:
+                self.values[attrname] = value
+            super().__setattr__(attrname, value)
+
+        def __repr__(self):
+            """Provide a string representation of the stored values."""
+            return repr(self.values)
+
+    def _get_entries(self):
+        """Retrieve all entries from the module."""
+        def copy_entry_and_set_name(entry, name):
+            _result = entry.copy()
+            _result.name = name
+            return _result
+
+        names = self.ansible_module.params_get("name")
+        if names is not None:
+            if not isinstance(names, list):
+                names = [names]
+            # Get entrie(s) defined by the 'name' parameter.
+            # For most states and modules, 'name' will represent a single
+            # entry, but for some states, like 'absent', it could be a
+            # list of names.
+            _entry = self._extract_entry(
+                self.ansible_module,
+                IPAAnsibleModule.params_get
+            )
+            # copy attribute values if 'name' returns a list
+            _entries = [
+                copy_entry_and_set_name(_entry, _name)
+                for _name in names
+            ]
+        else:
+            _entries = [
+                self._extract_entry(data, dict.get)
+                for data in self.ansible_module.params_get(self.multiname)
+            ]
+
+        return _entries
+
+    def _extract_entry(self, data, param_get):
+        """Extract an entry from the given data, using the given method."""
+        def get_entry_param_value(parameter, conversions):
+            _value = param_get(data, parameter)
+            if _value and conversions:
+                for fn in conversions:
+                    _value = fn(_value)
+            return _value
+
+        # Build 'parameter: value' mapping for all module parameters
+        _entry = {
+            parameter: get_entry_param_value(parameter, conversions)
+            for parameter, conversions in self.convert.items()
+        }
+
+        # Check if any invalid parameter is used.
+        self.check_invalid_parameter_usage(_entry)
+
+        # Create Entry object
+        _result = EntryFactory.Entry(_entry)
+        # Call entry validation callback, if provided.
+        if self.validate_entry:
+            _result = self.validate_entry(
+                self.ansible_module, _result, **self.user_vars)
+
+        return _result

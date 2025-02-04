@@ -113,7 +113,7 @@ RETURN = """
 
 from ansible.module_utils.ansible_freeipa_module import \
     IPAAnsibleModule, compare_args_ipa, gen_add_del_lists, gen_add_list, \
-    gen_intersection_list
+    gen_intersection_list, ipalib_errors
 from ansible.module_utils import six
 
 if six.PY3:
@@ -124,11 +124,10 @@ def find_$name(module, name):
     """Find if a $name with the given name already exist."""
     try:
         _result = module.ipa_command("$name_show", name, {"all": True})
-    except Exception:  # pylint: disable=broad-except
+    except ipalib_errors.NotFound:
         # An exception is raised if $name name is not found.
         return None
-    else:
-        return _result["result"]
+    return _result["result"]
 
 
 def gen_args(PARAMETER1):
@@ -157,10 +156,10 @@ def main():
             PARAMETER2=dict(required=False, type='list', elements='str',
                             default=None, aliases=["API_PARAMETER_NAME"]),
             # action
-            action=dict(type="str", default="$name", type="str",
+            action=dict(type="str", default="$name",
                         choices=["member", "$name"]),
             # state
-            state=dict(type="str", default="present", type="str",
+            state=dict(type="str", default="present",
                        choices=["present", "absent"]),
         ),
         supports_check_mode=True,

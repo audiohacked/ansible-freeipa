@@ -38,10 +38,11 @@ short_description: IPA replica deployment tests
 description: IPA replica deployment tests
 options:
   ip_addresses:
-    description: List of Master Server IP Addresses
+    description: List of IPA replica IP addresses
     type: list
     elements: str
     required: no
+    default: []
   domain:
     description: Primary DNS domain of the IPA deployment
     type: str
@@ -51,6 +52,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   realm:
     description: Kerberos realm name of the IPA deployment
     type: str
@@ -66,6 +68,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   hidden_replica:
     description: Install a hidden replica
     type: bool
@@ -112,18 +115,21 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   http_cert_files:
     description:
       File containing the Apache Server SSL certificate and private key
     type: list
     elements: str
     required: no
+    default: []
   pkinit_cert_files:
     description:
       File containing the Kerberos KDC SSL certificate and private key
     type: list
     elements: str
     required: no
+    default: []
   no_ntp:
     description: Do not configure ntp
     type: bool
@@ -134,6 +140,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   ntp_pool:
     description: ntp server pool to use
     type: str
@@ -153,6 +160,7 @@ options:
     type: list
     elements: str
     required: no
+    default: []
   no_forwarders:
     description: Do not add any DNS forwarders, use root servers instead
     type: bool
@@ -191,7 +199,7 @@ from ansible.module_utils.ansible_ipa_replica import (
     paths, sysrestore, ansible_module_get_parsed_ip_addresses, service,
     redirect_stdout, create_ipa_conf, ipautil,
     x509, validate_domain_name, common_check,
-    IPA_PYTHON_VERSION, getargspec, adtrustinstance
+    IPA_PYTHON_VERSION, getargspec, adtrustinstance, install_ca_cert
 )
 
 
@@ -450,7 +458,7 @@ def main():
     if installer.ca_cert_files is not None:
         if not isinstance(installer.ca_cert_files, list):
             ansible_module.fail_json(
-                msg="Expected list, got {!r}".format(installer.ca_cert_files))
+                msg="Expected list, got {0!r}".format(installer.ca_cert_files))
         for cert in installer.ca_cert_files:
             if not os.path.exists(cert):
                 ansible_module.fail_json(msg="'%s' does not exist" % cert)
@@ -521,6 +529,11 @@ def main():
             ansible_module.fail_json(
                 msg="NTP configuration cannot be updated during promotion")
 
+    # host_name an domain_name must be different at this point.
+    if options.host_name.lower() == options.domain_name.lower():
+        ansible_module.fail_json(
+            msg="hostname cannot be the same as the domain name")
+
     # done #
 
     ansible_module.exit_json(
@@ -537,7 +550,8 @@ def main():
         # additional
         client_enrolled=client_enrolled,
         change_master_for_certmonger=change_master_for_certmonger,
-        sid_generation_always=sid_generation_always
+        sid_generation_always=sid_generation_always,
+        install_ca_certs=install_ca_cert is not None
     )
 
 

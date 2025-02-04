@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -eu
 
 INFO="\033[37;1m"
 WARN="\033[33;1m"
@@ -10,8 +10,6 @@ pushd "${topdir}/.." >/dev/null 2>&1  || exit 1
 
 echo -e "${INFO}Running 'flake8'...${RST}"
 flake8 plugins utils roles setup.py
-echo -e "${INFO}Running 'pydocstyle'...${RST}"
-pydocstyle plugins utils roles setup.py
 echo -e "${INFO}Running 'pylint'...${RST}"
 pylint plugins roles setup.py
 
@@ -26,7 +24,7 @@ playbook_dirs=(
     "tests"
     "playbooks"
 )
-ansible-lint --force-color "${playbook_dirs[@]}"
+ansible-lint --offline --profile production --exclude tests/integration/ --exclude tests/unit/ --parseable --force-color "${playbook_dirs[@]}"
 
 echo -e "${INFO}Running 'ansible-doc-test'...${RST}"
 python "${topdir}/ansible-doc-test" -v roles plugins
@@ -35,7 +33,6 @@ echo -e "${INFO}Running 'yamllint'...${RST}"
 yaml_dirs=(
     "tests"
     "playbooks"
-    "molecule"
     "roles"
 )
 yamllint -f colored "${yaml_dirs[@]}"

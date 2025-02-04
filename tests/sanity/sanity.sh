@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -eu
 
 TOPDIR=$(readlink -f "$(dirname "$0")/../..")
 pushd "${TOPDIR}" >/dev/null || exit 1
@@ -8,11 +8,12 @@ ANSIBLE_COLLECTION=freeipa-ansible_freeipa
 
 use_docker=$(docker -v >/dev/null 2>&1 && echo "True" || echo "False")
 
-virtualenv "$VENV"
+python -m venv "$VENV"
 # shellcheck disable=SC1091
 source "$VENV"/bin/activate
 
 python -m pip install --upgrade pip
+pip install setuptools
 pip install galaxy_importer
 
 rm -f "$ANSIBLE_COLLECTION"-*.tar.gz

@@ -90,7 +90,7 @@ from ansible.module_utils.ansible_ipa_replica import (
     check_imports, AnsibleModuleLog, setup_logging, installer, DN, paths,
     gen_env_boostrap_finalize_core, constants, api_bootstrap_finalize,
     gen_ReplicaConfig, gen_remote_api, api, redirect_stdout, service,
-    find_providing_servers, services
+    find_providing_servers, services, clean_up_hsm_nicknames
 )
 
 
@@ -168,10 +168,13 @@ def main():
         # Everything installed properly, activate ipa service.
         services.knownservices.ipa.enable()
 
+        if options.setup_ca and clean_up_hsm_nicknames is not None:
+            clean_up_hsm_nicknames(api)
+
         # Print a warning if CA role is only installed on one server
         if len(ca_servers) == 1:
             msg = u'''
-                WARNING: The CA service is only installed on one server ({}).
+                WARNING: The CA service is only installed on one server ({0}).
                 It is strongly recommended to install it on another server.
                 Run ipa-ca-install(1) on another master to accomplish this.
             '''.format(ca_servers[0])

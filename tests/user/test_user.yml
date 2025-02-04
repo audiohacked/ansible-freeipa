@@ -9,7 +9,7 @@
     ipauser:
       ipaadmin_password: SomeADMINpassword
       ipaapi_context: "{{ ipa_context | default(omit) }}"
-      name: manager1,manager2,manager3,pinky,pinky2
+      name: manager1,manager2,manager3,pinky,pinky2,igagarin,reddy
       state: absent
 
   - name: User manager1 present
@@ -56,9 +56,10 @@
       first: pinky
       last: Acme
       initials: pa
-      #password: foo2
+      # password: foo2
       principal: pa
       random: yes
+      street: PinkyStreet
       city: PinkyCity
       userstate: PinkyState
       postalcode: PinkyZip
@@ -72,8 +73,8 @@
       # sshpubkey
       userauthtype: password,radius,otp
       userclass: PinkyUserClass
-      #radius: "http://some.link/"
-      #radiususer: PinkyRadiusUser
+      # radius: "http://some.link/"
+      # radiususer: PinkyRadiusUser
       departmentnumber: "1234"
       employeenumber: "0815"
       employeetype: "PinkyExmployeeType"
@@ -81,10 +82,48 @@
       # certificate
       noprivate: yes
       nomembers: false
-      #issuer: PinkyIssuer
-      #subject: PinkySubject
+      # issuer: PinkyIssuer
+      # subject: PinkySubject
     register: result
     failed_when: not result.changed or result.failed
+
+  - name: Ensure user presence with 'random:false'
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: pinky
+      first: pinky
+      last: Acme
+      random: false
+    register: result
+    failed_when: result.changed or result.failed
+
+  - name: Set street, again
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: pinky
+      street: PinkyStreet
+    register: result
+    failed_when: result.changed or result.failed
+
+  - name: Clear street attribute.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: pinky
+      street: ""
+    register: result
+    failed_when: not result.changed or result.failed
+
+  - name: Clear street attribute, again
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: pinky
+      street: ""
+    register: result
+    failed_when: result.changed or result.failed
 
   - name: User pinky present with changed settings
     ipauser:
@@ -313,6 +352,46 @@
     register: result
     failed_when: result.changed or result.failed
 
+  - name: Rename user pinky to reddy
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: pinky
+      rename: reddy
+      state: renamed
+    register: result
+    failed_when: not result.changed or result.failed
+
+  - name: Rename user pinky to reddy, again
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: pinky
+      rename: reddy
+      state: renamed
+    register: result
+    failed_when: not result.failed or "No user 'pinky'" not in result.msg
+
+  - name: Rename user reddy to reddy
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: reddy
+      rename: reddy
+      state: renamed
+    register: result
+    failed_when: result.changed or result.failed
+
+  - name: Rename user reddy back to pinky
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: reddy
+      rename: pinky
+      state: renamed
+    register: result
+    failed_when: not result.changed or result.failed
+
   - name: User pinky absent and preserved for future exclusion.
     ipauser:
       ipaadmin_password: SomeADMINpassword
@@ -342,9 +421,107 @@
     register: result
     failed_when: result.changed or result.failed
 
+  - name: Ensure user with GECOS information exists.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      first: Iuri
+      last: Gagarin
+      gecos: Юрий Алексеевич Гагарин
+    register: result
+    failed_when: not result.changed or result.failed
+
+  - name: Ensure user with GECOS information exists, again.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      first: Iuri
+      last: Gagarin
+      gecos: Юрий Алексеевич Гагарин
+    register: result
+    failed_when: result.changed or result.failed
+
+  - name: Modify GECOS information.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      gecos: Юрий Гагарин
+    register: result
+    failed_when: not result.changed or result.failed
+
+  - name: Updating with existent data, should not change user.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      first: Iuri
+      last: Gagarin
+      gecos: Юрий Гагарин
+    register: result
+    failed_when: result.changed or result.failed
+
+  - name: Ensure GECOS parameter is cleared.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      gecos: ""
+    register: result
+    failed_when: not result.changed or result.failed
+
+  - name: Ensure GECOS parameter is cleared, again
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      gecos: ""
+    register: result
+    failed_when: result.changed or result.failed
+
+  - name: Ensure GECOS parameter cannot be used with state absent.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      gecos: Юрий Гагарин
+      state: absent
+    register: result
+    failed_when: not result.failed or "Argument 'gecos' can not be used with action 'user' and state 'absent'" not in result.msg
+
+  - name: Ensure user igagarin is absent.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      state: absent
+    register: result
+    failed_when: not result.changed or result.failed
+
+  - name: Ensure user with non-ascii name exists.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      first: Юрий
+      last: Гагарин
+    register: result
+    failed_when: not result.changed or result.failed
+
+  - name: Ensure user with non-ascii name exists has proper GECOS value.
+    ipauser:
+      ipaadmin_password: SomeADMINpassword
+      ipaapi_context: "{{ ipa_context | default(omit) }}"
+      name: igagarin
+      gecos: Юрий Гагарин
+    register: result
+    failed_when: result.changed or result.failed
+
   - name: Remove test users
     ipauser:
       ipaadmin_password: SomeADMINpassword
       ipaapi_context: "{{ ipa_context | default(omit) }}"
-      name: manager1,manager2,manager3,pinky,pinky2
+      name: manager1,manager2,manager3,pinky,pinky2,igagarin
       state: absent

@@ -1394,15 +1394,16 @@ def gen_args(entry):
 
     if record_value is not None:
         record_type = entry['record_type']
-        rec = "{}record".format(record_type.lower())
+        rec = "{0}record".format(record_type.lower())
         args[rec] = ensure_data_is_list(record_value)
 
     else:
         for field in _RECORD_FIELDS:
             record_value = entry.get(field) or entry.get("%sord" % field)
             if record_value is not None:
+                # pylint: disable=use-maxsplit-arg
                 record_type = field.split('_')[0]
-                rec = "{}record".format(record_type.lower())
+                rec = "{0}record".format(record_type.lower())
                 args[rec] = ensure_data_is_list(record_value)
 
         records = {
@@ -1452,7 +1453,7 @@ def define_commands_for_present_state(module, zone_name, entry, res_find):
     else:
         # Create reverse records for existing records
         for ipv in ['a', 'aaaa']:
-            record = ('%srecord' % ipv)
+            record = '%srecord' % ipv
             if record in args and ('%s_extra_create_reverse' % ipv) in args:
                 cmds = create_reverse_ip_record(
                     module, zone_name, name, args[record])
@@ -1603,6 +1604,8 @@ def main():
             check_parameters(ansible_module, state, zone_name, entry)
 
             res_find = find_dnsrecord(ansible_module, zone_name, name)
+
+            cmds = []
 
             if state == 'present':
                 cmds = define_commands_for_present_state(
