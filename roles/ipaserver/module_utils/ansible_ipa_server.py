@@ -23,7 +23,9 @@
 
 from __future__ import (absolute_import, division, print_function)
 
-__metaclass__ = type  # pylint: disable=invalid-name
+# pylint: disable=invalid-name
+__metaclass__ = type
+# pylint: enable=invalid-name
 
 __all__ = ["IPAChangeConf", "certmonger", "sysrestore", "root_logger",
            "ipa_generate_password", "run", "ScriptError", "services",
@@ -44,7 +46,7 @@ __all__ = ["IPAChangeConf", "certmonger", "sysrestore", "root_logger",
            "check_available_memory", "getargspec", "get_min_idstart",
            "paths", "api", "ipautil", "adtrust_imported", "NUM_VERSION",
            "time_service", "kra_imported", "dsinstance", "IPA_PYTHON_VERSION",
-           "NUM_VERSION", "SerialNumber"]
+           "NUM_VERSION", "SerialNumber", "realm_to_ldapi_uri"]
 
 import sys
 import logging
@@ -121,6 +123,10 @@ try:
         )
         from ipapython.dnsutil import check_zone_overlap
         from ipapython.dn import DN
+        try:
+            from ipapython.ipaldap import realm_to_ldapi_uri
+        except ImportError:
+            realm_to_ldapi_uri = None
         try:
             from ipaclient.install import timeconf
             from ipaclient.install.client import sync_time
@@ -212,8 +218,7 @@ try:
 
     else:
         # IPA version < 4.5
-
-        raise Exception("freeipa version '%s' is too old" % VERSION)
+        raise RuntimeError("freeipa version '%s' is too old" % VERSION)
 
 except ImportError as _err:
     ANSIBLE_IPA_SERVER_MODULE_IMPORT_ERROR = str(_err)
@@ -348,6 +353,13 @@ options.add_agents = False
 # ADTrustInstallInterface
 # no_msdcs is deprecated
 options.no_msdcs = False
+
+# Hotfix for https://github.com/freeipa/freeipa/pull/7343
+options.dns_over_tls = False
+options.dns_over_tls_key = None
+options.dns_over_tls_cert = None
+options.dot_forwarders = None
+options.dns_policy = None
 
 # For pylint
 options.external_cert_files = None

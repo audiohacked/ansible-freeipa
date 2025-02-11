@@ -33,15 +33,16 @@ Supported Distributions
 -----------------------
 
 * RHEL/CentOS 7.6+
-* Fedora 26+
-* Ubuntu
+* CentOS Stream 8+
+* Fedora 40+
+* Ubuntu 16.04 and 18.04
 
 
 Requirements
 ------------
 
 **Controller**
-* Ansible version: 2.8+
+* Ansible version: 2.14+
 
 **Node**
 * Supported FreeIPA version (see above)

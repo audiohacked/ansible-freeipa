@@ -31,7 +31,7 @@ def set_env_if_not_set(envvar, value):
         os.environ[envvar] = value
 
 
-def pytest_configure(config):
+def pytest_configure(config):  # pylint: disable=unused-argument
     test_dir = os.getenv("TWD")
     if not test_dir:
         return
@@ -40,7 +40,7 @@ def pytest_configure(config):
     if os.path.exists(config_dir):
         inventory_path = os.path.join(config_dir, "test.inventory.yml")
         inventory = get_inventory(inventory_path)
-        print("Configuring execution using {}".format(inventory_path))
+        print("Configuring execution using {0}".format(inventory_path))
         ipaservers = inventory["all"]["children"]["ipaserver"]["hosts"]
         ipaserver = list(ipaservers.values())[0]
         private_key = os.path.join(config_dir, "id_rsa")

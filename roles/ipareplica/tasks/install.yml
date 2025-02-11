@@ -57,6 +57,11 @@
     ipareplica_servers: "{{ groups['ipaservers'] | list }}"
   when: groups.ipaservers is defined and ipareplica_servers is not defined
 
+- name: Install - Set ipareplica_servers from cluster inventory
+  ansible.builtin.set_fact:
+    ipareplica_servers: "{{ groups['ipaserver'] | list }}"
+  when: ipareplica_servers is not defined and groups.ipaserver is defined
+
 - name: Install - Set default principal if no keytab is given
   ansible.builtin.set_fact:
     ipaadmin_principal: admin
@@ -120,6 +125,7 @@
       ipaclient_realm: "{{ result_ipareplica_test.realm | default(omit) }}"
       ipaclient_servers: "{{ ipareplica_servers | default(omit) }}"
       ipaclient_hostname: "{{ result_ipareplica_test.hostname }}"
+      ipaclient_ip_addresses: "{{ ipareplica_ip_addresses | default(omit) }}"
       ipaclient_install_packages: "{{ ipareplica_install_packages }}"
     when: not result_ipareplica_test.client_enrolled
 
@@ -204,6 +210,7 @@
       server: "{{ result_ipareplica_test.server }}"
       skip_conncheck: "{{ ipareplica_skip_conncheck }}"
       sid_generation_always: "{{ result_ipareplica_test.sid_generation_always }}"
+      ipa_client_installed: "{{ result_ipareplica_test.client_enrolled }}"
     register: result_ipareplica_prepare
 
   - name: Install - Add to ipaservers
@@ -271,6 +278,7 @@
       config_ca_host_name: "{{ result_ipareplica_prepare.config_ca_host_name }}"
       config_ips: "{{ result_ipareplica_prepare.config_ips }}"
     register: result_ipareplica_install_ca_certs
+    when: result_ipareplica_test.install_ca_certs
 
   - name: Install - Setup DS
     ipareplica_setup_ds:
@@ -307,7 +315,7 @@
       dirman_password: "{{ __derived_dirman_password }}"
       config_setup_ca: "{{ result_ipareplica_prepare.config_setup_ca }}"
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       config_ca_host_name: "{{ result_ipareplica_prepare.config_ca_host_name }}"
       config_ips: "{{ result_ipareplica_prepare.config_ips }}"
     register: result_ipareplica_setup_ds
@@ -334,7 +342,7 @@
       ### additional ###
       server: "{{ result_ipareplica_test.server }}"
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       config_ca_host_name: "{{ result_ipareplica_prepare.config_ca_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       installer_ccache: "{{ result_ipareplica_prepare.installer_ccache }}"
@@ -357,7 +365,7 @@
       subject_base: "{{ result_ipareplica_prepare.subject_base }}"
       ### additional ###
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       _pkinit_pkcs12_info: "{{ result_ipareplica_prepare._pkinit_pkcs12_info if result_ipareplica_prepare._pkinit_pkcs12_info != None else omit }}"
       _top_dir: "{{ result_ipareplica_prepare._top_dir }}"
@@ -388,7 +396,7 @@
       ### additional ###
       server: "{{ result_ipareplica_test.server }}"
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       config_ca_host_name: "{{ result_ipareplica_prepare.config_ca_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       installer_ccache: "{{ result_ipareplica_prepare.installer_ccache }}"
@@ -401,7 +409,7 @@
       dirman_password: "{{ __derived_dirman_password }}"
       setup_ca: "{{ result_ipareplica_prepare.config_setup_ca }}"
       master:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
     when: result_ipareplica_test.change_master_for_certmonger
 
   - name: Install - DS enable SSL
@@ -415,7 +423,7 @@
       subject_base: "{{ result_ipareplica_prepare.subject_base }}"
       ### additional ###
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       _ca_enabled: "{{ result_ipareplica_prepare._ca_enabled }}"
       _ca_file: "{{ result_ipareplica_prepare._ca_file }}"
@@ -436,7 +444,7 @@
       subject_base: "{{ result_ipareplica_prepare.subject_base }}"
       ### additional ###
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       config_ca_host_name: "{{ result_ipareplica_prepare.config_ca_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       _ca_enabled: "{{ result_ipareplica_prepare._ca_enabled }}"
@@ -468,7 +476,7 @@
       ### additional ###
       server: "{{ result_ipareplica_test.server }}"
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       config_ca_host_name: "{{ result_ipareplica_prepare.config_ca_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       installer_ccache: "{{ result_ipareplica_prepare.installer_ccache }}"
@@ -493,7 +501,7 @@
       subject_base: "{{ result_ipareplica_prepare.subject_base }}"
       ### additional ###
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       _ca_file: "{{ result_ipareplica_prepare._ca_file }}"
       _top_dir: "{{ result_ipareplica_prepare._top_dir }}"
@@ -544,9 +552,9 @@
       dirman_password: "{{ __derived_dirman_password }}"
       config_setup_ca: "{{ result_ipareplica_prepare.config_setup_ca }}"
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       config_ca_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_ca_host_name }}"
+        "{{ result_ipareplica_prepare.config_ca_host_name }}"
       config_ips: "{{ result_ipareplica_prepare.config_ips }}"
     when: result_ipareplica_prepare._ca_enabled
 
@@ -560,7 +568,7 @@
       subject_base: "{{ result_ipareplica_prepare.subject_base }}"
       ### additional ###
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       _ca_enabled: "{{ result_ipareplica_prepare._ca_enabled }}"
       _ca_file: "{{ result_ipareplica_prepare._ca_file }}"
@@ -580,7 +588,7 @@
       subject_base: "{{ result_ipareplica_prepare.subject_base }}"
       ### additional ###
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       _ca_enabled: "{{ result_ipareplica_prepare._ca_enabled }}"
       _ca_file: "{{ result_ipareplica_prepare._ca_file }}"
@@ -640,7 +648,7 @@
       subject_base: "{{ result_ipareplica_prepare.subject_base }}"
       ### additional ###
       config_master_host_name:
-        "{{ result_ipareplica_install_ca_certs.config_master_host_name }}"
+        "{{ result_ipareplica_prepare.config_master_host_name }}"
       ccache: "{{ result_ipareplica_prepare.ccache }}"
       _ca_file: "{{ result_ipareplica_prepare._ca_file }}"
       _top_dir: "{{ result_ipareplica_prepare._top_dir }}"

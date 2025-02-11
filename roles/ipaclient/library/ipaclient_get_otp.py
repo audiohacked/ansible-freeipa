@@ -89,9 +89,13 @@ try:
     from ipapython.ipautil import run
     from ipalib.constants import DEFAULT_CONFIG
     try:
-        from ipalib.install.kinit import kinit_password, kinit_keytab
+        from ipalib.kinit import kinit_password, kinit_keytab
     except ImportError:
-        from ipapython.ipautil import kinit_password, kinit_keytab
+        try:
+            from ipalib.install.kinit import kinit_password, kinit_keytab
+        except ImportError:
+            # pre 4.5.0
+            from ipapython.ipautil import kinit_password, kinit_keytab
 except ImportError as _err:
     MODULE_IMPORT_ERROR = str(_err)
 else:
@@ -123,7 +127,7 @@ def temp_kdestroy(ccache_dir, ccache_name):
     """Destroy temporary ticket and remove temporary ccache."""
     if ccache_name is not None:
         run([paths.KDESTROY, '-c', ccache_name], raiseonerr=False)
-        del os.environ['KRB5CCNAME']
+        os.environ.pop('KRB5CCNAME', None)
     if ccache_dir is not None:
         shutil.rmtree(ccache_dir, ignore_errors=True)
 

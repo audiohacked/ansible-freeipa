@@ -8,10 +8,8 @@ jobs:
     name: Verify ansible-test sanity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3.1.0
+      - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
-      - name: Install virtualenv using pip
-        run: pip install virtualenv
       - name: Run ansible-test
         run: bash tests/sanity/sanity.sh

@@ -250,6 +250,8 @@ def main():
         operation = "add"
 
     invalid = []
+    wants_enable = False
+
     if state in ["enabled", "disabled"]:
         if action == "member":
             ansible_module.fail_json(
@@ -258,7 +260,7 @@ def main():
         invalid = [
             "forwarders", "forwardpolicy", "skip_overlap_check", "permission"
         ]
-        wants_enable = (state == "enabled")
+        wants_enable = state == "enabled"
 
     if operation == "del":
         invalid = [

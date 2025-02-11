@@ -49,7 +49,7 @@ __all__ = ["contextlib", "dnsexception", "dnsresolver", "dnsreversename",
            "dnsname", "kernel_keyring", "krbinstance", "getargspec",
            "adtrustinstance", "paths", "api", "dsinstance", "ipaldap", "Env",
            "ipautil", "installutils", "IPA_PYTHON_VERSION", "NUM_VERSION",
-           "ReplicaConfig", "create_api"]
+           "ReplicaConfig", "create_api", "clean_up_hsm_nicknames"]
 
 import sys
 import logging
@@ -104,7 +104,10 @@ try:
         from ipaclient.install.ipachangeconf import IPAChangeConf
         from ipalib.install import certstore, sysrestore
         from ipapython.ipautil import ipa_generate_password
-        from ipalib.install.kinit import kinit_keytab
+        try:
+            from ipalib.kinit import kinit_keytab
+        except ImportError:
+            from ipalib.install.kinit import kinit_keytab
         from ipapython import ipaldap, ipautil, kernel_keyring
         from ipapython.certdb import IPA_CA_TRUST_FLAGS, \
             EXTERNAL_CA_TRUST_FLAGS
@@ -141,7 +144,7 @@ try:
         from ipaserver.install.replication import (
             ReplicationManager, replica_conn_check)
         from ipaserver.install.server.replicainstall import (
-            make_pkcs12_info, install_replica_ds, install_krb, install_ca_cert,
+            make_pkcs12_info, install_replica_ds, install_krb,
             install_http, install_dns_records, create_ipa_conf, check_dirsrv,
             check_dns_resolution, configure_certmonger,
             remove_replica_info_dir,
@@ -154,6 +157,16 @@ try:
             # ensure_enrolled,
             promotion_check_ipa_domain
         )
+        try:
+            from ipaserver.install.server.replicainstall import \
+                install_ca_cert
+        except ImportError:
+            install_ca_cert = None
+        try:
+            from ipaserver.install.server.replicainstall import \
+                clean_up_hsm_nicknames
+        except ImportError:
+            clean_up_hsm_nicknames = None
         import SSSDConfig
         from subprocess import CalledProcessError
 
@@ -171,8 +184,7 @@ try:
 
     else:
         # IPA version < 4.6
-
-        raise Exception("freeipa version '%s' is too old" % VERSION)
+        raise RuntimeError("freeipa version '%s' is too old" % VERSION)
 
 except ImportError as _err:
     ANSIBLE_IPA_REPLICA_MODULE_IMPORT_ERROR = str(_err)
@@ -319,6 +331,13 @@ options.add_agents = False
 # ServerReplicaInstall
 options.subject_base = None
 options.ca_subject = None
+
+# Hotfix for https://github.com/freeipa/freeipa/pull/7343
+options.dns_over_tls = False
+options.dns_over_tls_key = None
+options.dns_over_tls_cert = None
+options.dot_forwarders = None
+options.dns_policy = None
 # pylint: enable=attribute-defined-outside-init
 
 
@@ -334,7 +353,7 @@ def gen_env_boostrap_finalize_core(etc_ipa, default_config):
 def api_bootstrap_finalize(env):
     # pylint: disable=no-member
     xmlrpc_uri = \
-        'https://{}/ipa/xml'.format(ipautil.format_netloc(env.host))
+        'https://{0}/ipa/xml'.format(ipautil.format_netloc(env.host))
     api.bootstrap(in_server=True,
                   context='installer',
                   confdir=paths.ETC_IPA,
@@ -479,7 +498,7 @@ def ansible_module_get_parsed_ip_addresses(ansible_module,
 
 def gen_remote_api(master_host_name, etc_ipa):
     ldapuri = 'ldaps://%s' % ipautil.format_netloc(master_host_name)
-    xmlrpc_uri = 'https://{}/ipa/xml'.format(
+    xmlrpc_uri = 'https://{0}/ipa/xml'.format(
         ipautil.format_netloc(master_host_name))
     remote_api = create_api(mode=None)
     remote_api.bootstrap(in_server=True,

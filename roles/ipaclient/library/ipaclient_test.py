@@ -226,6 +226,10 @@ nosssd_files:
   returned: always
   type: list
   elements: str
+selinux_works:
+  description: True if the selinux status check passed.
+  returned: always
+  type: bool
 '''
 
 import os
@@ -432,7 +436,7 @@ def main():
         if options.ca_cert_files is not None:
             for value in options.ca_cert_files:
                 if not isinstance(value, list):
-                    raise ValueError("Expected list, got {!r}".format(value))
+                    raise ValueError("Expected list, got {0!r}".format(value))
                 # this is what init() does
                 value = value[-1]
                 if not os.path.exists(value):
@@ -495,6 +499,8 @@ def main():
     #     not installer.no_krb5_offline_passwords
     installer.sssd = not installer.no_sssd
 
+    selinux_works = False
+
     try:
 
         # client
@@ -529,7 +535,7 @@ def main():
                 "You must be root to run ipa-client-install.",
                 rval=CLIENT_INSTALL_ERROR)
 
-        tasks.check_selinux_status()
+        selinux_works = tasks.check_selinux_status()
 
         # if is_ipa_client_installed(fstore, on_master=options.on_master):
         #     logger.error("IPA client is already configured on this system.")
@@ -575,13 +581,13 @@ def main():
             hostname_source = "Machine's FQDN"
         if hostname != hostname.lower():
             raise ScriptError(
-                "Invalid hostname '{}', must be lower-case.".format(hostname),
+                "Invalid hostname '{0}', must be lower-case.".format(hostname),
                 rval=CLIENT_INSTALL_ERROR
             )
 
         if hostname in ('localhost', 'localhost.localdomain'):
             raise ScriptError(
-                "Invalid hostname, '{}' must not be used.".format(hostname),
+                "Invalid hostname, '{0}' must not be used.".format(hostname),
                 rval=CLIENT_INSTALL_ERROR)
 
         if hasattr(constants, "MAXHOSTNAMELEN"):
@@ -589,7 +595,7 @@ def main():
                 validate_hostname(hostname, maxlen=constants.MAXHOSTNAMELEN)
             except ValueError as e:
                 raise ScriptError(
-                    'invalid hostname: {}'.format(e),
+                    'invalid hostname: {0}'.format(e),
                     rval=CLIENT_INSTALL_ERROR)
 
         if hasattr(tasks, "is_nosssd_supported"):
@@ -695,7 +701,7 @@ def main():
                 rval=CLIENT_INSTALL_ERROR)
         if ret == ipadiscovery.NOT_FQDN:
             raise ScriptError(
-                "{} is not a fully-qualified hostname".format(hostname),
+                "{0} is not a fully-qualified hostname".format(hostname),
                 rval=CLIENT_INSTALL_ERROR)
         if ret in (ipadiscovery.NO_LDAP_SERVER, ipadiscovery.NOT_IPA_SERVER) \
                 or not ds.domain:
@@ -971,7 +977,8 @@ def main():
                      ntp_pool=options.ntp_pool,
                      client_already_configured=client_already_configured,
                      ipa_python_version=IPA_PYTHON_VERSION,
-                     nosssd_files=nosssd_files)
+                     nosssd_files=nosssd_files,
+                     selinux_works=selinux_works)
 
 
 if __name__ == '__main__':

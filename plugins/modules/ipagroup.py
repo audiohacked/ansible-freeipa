@@ -113,16 +113,22 @@ options:
       externalmember:
         description:
         - List of members of a trusted domain in DOM\\name or name@domain form.
+          Requires "server" context.
         required: false
         type: list
         elements: str
         aliases: ["ipaexternalmember", "external_member"]
       idoverrideuser:
         description:
-        - User ID overrides to add
+        - User ID overrides to add. Requires "server" context.
         required: false
         type: list
         elements: str
+      rename:
+        description: Rename the group object
+        required: false
+        type: str
+        aliases: ["new_name"]
   description:
     description: The group description
     type: str
@@ -183,13 +189,14 @@ options:
   externalmember:
     description:
     - List of members of a trusted domain in DOM\\name or name@domain form.
+      Requires "server" context.
     required: false
     type: list
     elements: str
     aliases: ["ipaexternalmember", "external_member"]
   idoverrideuser:
     description:
-    - User ID overrides to add
+    - User ID overrides to add. Requires "server" context.
     required: false
     type: list
     elements: str
@@ -198,11 +205,16 @@ options:
     type: str
     default: group
     choices: ["member", "group"]
+  rename:
+    description: Rename the group object
+    required: false
+    type: str
+    aliases: ["new_name"]
   state:
     description: State to ensure
     type: str
     default: present
-    choices: ["present", "absent"]
+    choices: ["present", "absent", "renamed"]
 author:
   - Thomas Woerner (@t-woerner)
 """
@@ -267,6 +279,13 @@ EXAMPLES = """
       group:
         - group2
 
+# Rename a group
+- ipagroup:
+    ipaadmin_password: SomeADMINpassword
+    name: oldname
+    rename: newestname
+    state: renamed
+
 # Create a non-POSIX group
 - ipagroup:
     ipaadmin_password: SomeADMINpassword
@@ -280,6 +299,7 @@ EXAMPLES = """
     posix: yes
 
 # Create an external group and add members from a trust to it.
+# Module will fail if running under 'client' context.
 - ipagroup:
     ipaadmin_password: SomeADMINpassword
     name: extgroup
@@ -310,7 +330,8 @@ RETURN = """
 from ansible.module_utils._text import to_text
 from ansible.module_utils.ansible_freeipa_module import \
     IPAAnsibleModule, compare_args_ipa, gen_add_del_lists, \
-    gen_add_list, gen_intersection_list, api_check_param
+    gen_add_list, gen_intersection_list, api_check_param, \
+    convert_to_sid
 from ansible.module_utils import six
 if six.PY3:
     unicode = str
@@ -380,18 +401,20 @@ def gen_member_args(user, group, service, externalmember, idoverrideuser):
 
 
 def check_parameters(module, state, action):
-    invalid = []
-    if state == "present":
-        if action == "member":
-            invalid = ["description", "gid", "posix", "nonposix", "external",
-                       "nomembers"]
-
-    else:
-        invalid = ["description", "gid", "posix", "nonposix", "external",
-                   "nomembers"]
-        if action == "group":
+    invalid = ["description", "gid", "posix", "nonposix", "external",
+               "nomembers"]
+    if action == "group":
+        if state == "present":
+            invalid = []
+        elif state == "absent":
             invalid.extend(["user", "group", "service", "externalmember"])
-
+    if state == "renamed":
+        if action == "member":
+            module.fail_json(
+                msg="Action member can not be used with state: renamed.")
+        invalid.extend(["user", "group", "service", "externalmember"])
+    else:
+        invalid.append("rename")
     module.params_fail_used_invalid(invalid, state, action)
 
 
@@ -448,7 +471,9 @@ def main():
                             aliases=[
                                 "ipaexternalmember",
                                 "external_member"
-                            ])
+                            ]),
+        rename=dict(type="str", required=False, default=None,
+                    aliases=["new_name"]),
     )
     ansible_module = IPAAnsibleModule(
         argument_spec=dict(
@@ -470,7 +495,7 @@ def main():
             action=dict(type="str", default="group",
                         choices=["member", "group"]),
             state=dict(type="str", default="present",
-                       choices=["present", "absent"]),
+                       choices=["present", "absent", "renamed"]),
 
             # Add group specific parameters for simple use case
             **group_spec
@@ -499,15 +524,19 @@ def main():
     idoverrideuser = ansible_module.params_get("idoverrideuser")
     posix = ansible_module.params_get("posix")
     nomembers = ansible_module.params_get("nomembers")
-    user = ansible_module.params_get("user")
-    group = ansible_module.params_get("group")
+    user = ansible_module.params_get_lowercase("user")
+    group = ansible_module.params_get_lowercase("group")
     # Services are not case sensitive
     service = ansible_module.params_get_lowercase("service")
-    membermanager_user = ansible_module.params_get("membermanager_user")
-    membermanager_group = ansible_module.params_get("membermanager_group")
+    membermanager_user = (
+        ansible_module.params_get_lowercase("membermanager_user"))
+    membermanager_group = (
+        ansible_module.params_get_lowercase("membermanager_group"))
     externalmember = ansible_module.params_get("externalmember")
+    # rename
+    rename = ansible_module.params_get("rename")
+    # state and action
     action = ansible_module.params_get("action")
-    # state
     state = ansible_module.params_get("state")
 
     # Check parameters
@@ -516,10 +545,11 @@ def main():
        (groups is None or len(groups) < 1):
         ansible_module.fail_json(msg="At least one name or groups is required")
 
-    if state == "present":
+    if state in ["present", "renamed"]:
         if names is not None and len(names) != 1:
+            what = "renamed" if state == "renamed" else "added"
             ansible_module.fail_json(
-                msg="Only one group can be added at a time using 'name'.")
+                msg="Only one group can be %s at a time using 'name'." % what)
 
     check_parameters(ansible_module, state, action)
 
@@ -536,20 +566,28 @@ def main():
     # The simple solution is to switch to client context for ensuring
     # several groups simply if the user was not explicitly asking for
     # the server context no matter if mixed types are used.
-    context = None
+    context = ansible_module.params_get("ipaapi_context")
     if state == "present" and groups is not None and len(groups) > 1 \
        and not FIX_6741_DEEPCOPY_OBJECTCLASSES:
-        _context = ansible_module.params_get("ipaapi_context")
-        if _context is None:
+        if context is None:
             context = "client"
             ansible_module.debug(
                 "Switching to client context due to an unfixed issue in "
                 "your IPA version: https://pagure.io/freeipa/issue/9349")
-        elif _context == "server":
+        elif context == "server":
             ansible_module.fail_json(
                 msg="Ensuring several groups with server context is not "
                 "supported by your IPA version: "
                 "https://pagure.io/freeipa/issue/9349")
+
+    if (
+        (externalmember is not None
+         or idoverrideuser is not None)
+        and context == "client"
+    ):
+        ansible_module.fail_json(
+            msg="Cannot use externalmember in client context."
+        )
 
     # Use groups if names is None
     if groups is not None:
@@ -633,10 +671,15 @@ def main():
                 membermanager_group = group_name.get("membermanager_group")
                 externalmember = group_name.get("externalmember")
                 nomembers = group_name.get("nomembers")
+                rename = group_name.get("rename")
 
                 check_parameters(ansible_module, state, action)
 
-            elif isinstance(group_name, (str, unicode)):
+            elif (
+                isinstance(
+                    group_name, (str, unicode)  # pylint: disable=W0012,E0606
+                )
+            ):
                 name = group_name
             else:
                 ansible_module.fail_json(msg="Group '%s' is not valid" %
@@ -644,6 +687,23 @@ def main():
 
             # Make sure group exists
             res_find = find_group(ansible_module, name)
+
+            # external members must de handled as SID
+            externalmember = convert_to_sid(externalmember)
+
+            # idoverrides need to be compared through SID
+            idoverrideuser_sid = convert_to_sid(idoverrideuser)
+            res_idoverrideuser_sid = convert_to_sid(
+                (res_find or {}).get("member_idoverrideuser", []))
+            idoverride_set = dict(
+                list(zip(idoverrideuser_sid or [], idoverrideuser or [])) +
+                list(
+                    zip(
+                        res_idoverrideuser_sid or [],
+                        (res_find or {}).get("member_idoverrideuser", [])
+                    )
+                )
+            )
 
             user_add, user_del = [], []
             group_add, group_del = [], []
@@ -692,11 +752,12 @@ def main():
                         res_find = {}
 
                     # if we just created/modified the group, update res_find
-                    res_find.setdefault("objectclass", [])
+                    classes = list(res_find.setdefault("objectclass", []))
                     if external and not is_external_group(res_find):
-                        res_find["objectclass"].append("ipaexternalgroup")
+                        classes.append("ipaexternalgroup")
                     if posix and not is_posix_group(res_find):
-                        res_find["objectclass"].append("posixgroup")
+                        classes.append("posixgroup")
+                    res_find["objectclass"] = classes
 
                     member_args = gen_member_args(
                         user, group, service, externalmember, idoverrideuser
@@ -715,13 +776,25 @@ def main():
 
                         (externalmember_add,
                          externalmember_del) = gen_add_del_lists(
-                            externalmember, res_find.get("member_external"))
+                            externalmember, (
+                                list(res_find.get("member_external", []))
+                                + list(res_find.get("ipaexternalmember", []))
+                            )
+                        )
 
+                        # There are multiple ways to name an AD User, and any
+                        # can be used in idoverrides, so we create the add/del
+                        # lists based on SID, and then use the given user name
+                        # to the idoverride.
                         (idoverrides_add,
                          idoverrides_del) = gen_add_del_lists(
-                            idoverrideuser,
-                            res_find.get("member_idoverrideuser")
-                        )
+                            idoverrideuser_sid, res_idoverrideuser_sid)
+                        idoverrides_add = [
+                            idoverride_set[sid] for sid in set(idoverrides_add)
+                        ]
+                        idoverrides_del = [
+                            idoverride_set[sid] for sid in set(idoverrides_del)
+                        ]
 
                     membermanager_user_add, membermanager_user_del = \
                         gen_add_del_lists(
@@ -749,9 +822,16 @@ def main():
                     service_add = gen_add_list(
                         service, res_find.get("member_service"))
                     externalmember_add = gen_add_list(
-                        externalmember, res_find.get("member_external"))
+                        externalmember, (
+                            list(res_find.get("member_external", []))
+                            + list(res_find.get("ipaexternalmember", []))
+                        )
+                    )
                     idoverrides_add = gen_add_list(
-                        idoverrideuser, res_find.get("member_idoverrideuser"))
+                        idoverrideuser_sid, res_idoverrideuser_sid)
+                    idoverrides_add = [
+                        idoverride_set[sid] for sid in set(idoverrides_add)
+                    ]
 
                     membermanager_user_add = gen_add_list(
                         membermanager_user,
@@ -784,9 +864,16 @@ def main():
                     service_del = gen_intersection_list(
                         service, res_find.get("member_service"))
                     externalmember_del = gen_intersection_list(
-                        externalmember, res_find.get("member_external"))
+                        externalmember, (
+                            list(res_find.get("member_external", []))
+                            + list(res_find.get("ipaexternalmember", []))
+                        )
+                    )
                     idoverrides_del = gen_intersection_list(
-                        idoverrideuser, res_find.get("member_idoverrideuser"))
+                        idoverrideuser_sid, res_idoverrideuser_sid)
+                    idoverrides_del = [
+                        idoverride_set[sid] for sid in set(idoverrides_del)
+                    ]
 
                     membermanager_user_del = gen_intersection_list(
                         membermanager_user, res_find.get("membermanager_user"))
@@ -794,6 +881,11 @@ def main():
                         membermanager_group,
                         res_find.get("membermanager_group")
                     )
+            elif state == "renamed":
+                if res_find is None:
+                    ansible_module.fail_json(msg="No group '%s'" % name)
+                elif rename != name:
+                    commands.append([name, 'group_mod', {"rename": rename}])
             else:
                 ansible_module.fail_json(msg="Unkown state '%s'" % state)
 
@@ -824,7 +916,7 @@ def main():
                 if len(externalmember_del) > 0:
                     del_member_args["ipaexternalmember"] = \
                         externalmember_del
-            elif externalmember or external:
+            elif externalmember:
                 ansible_module.fail_json(
                     msg="Cannot add external members to a "
                         "non-external group."
@@ -868,7 +960,7 @@ def main():
 
         # Execute commands
         changed = ansible_module.execute_ipa_commands(
-            commands, fail_on_member_errors=True)
+            commands, batch=True, keeponly=[], fail_on_member_errors=True)
 
     # Done
 
